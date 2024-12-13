@@ -3,14 +3,19 @@ package server
 import (
 	"encoding/json"
 	"log"
+	"math/rand"
 	"net/http"
+	"regexp"
+	"time"
+
+	"github.com/jmoiron/sqlx"
 )
 
 func (s *Server) RegisterRoutes() http.Handler {
 	mux := http.NewServeMux()
 
 	// Register routes
-	mux.HandleFunc("/", s.HelloWorldHandler)
+	mux.HandleFunc("/shorten-url", s.GenerateShortUrlHandler)
 
 	mux.HandleFunc("/health", s.healthHandler)
 
@@ -37,17 +42,51 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func (s *Server) HelloWorldHandler(w http.ResponseWriter, r *http.Request) {
-	resp := map[string]string{"message": "Hello World"}
-	jsonResp, err := json.Marshal(resp)
-	if err != nil {
-		http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
+const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+func randomString(length int) string {
+	seededRand := rand.New(rand.NewSource(time.Now().UnixNano()))
+	result := make([]byte, length)
+	for i := range result {
+		result[i] = charset[seededRand.Intn(len(charset))]
+	}
+	return string(result)
+}
+
+func (s *Server) GenerateShortUrlHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	if _, err := w.Write(jsonResp); err != nil {
-		log.Printf("Failed to write response: %v", err)
+
+	type Url struct {
+		Url string `json:"url"`
 	}
+
+	var url Url
+
+	err := json.NewDecoder(r.Body).Decode(&url)
+
+	if err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	urlRegex := `https?://(?:www\.)?[a-zA-Z0-9-]+(\.[a-zA-Z]{2,})+(:[0-9]{1,5})?(/[^\s]*)?`
+	re := regexp.MustCompile(urlRegex)
+	isMatch := re.MatchString(url.Url)
+
+	if !isMatch {
+		http.Error(w, "Invalid Url", http.StatusBadRequest)
+		return
+	}
+
+	uniquecode := randomString(4)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+
+	insertUrl = `insert into url (long_url, unique_code) values (?, ?)`
+
 }
 
 func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
