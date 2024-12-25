@@ -13,8 +13,13 @@ RUN go install github.com/a-h/templ/cmd/templ@latest && \
     chmod +x tailwindcss && \
     ./tailwindcss -i cmd/web/assets/css/input.css -o cmd/web/assets/css/output.css
 
+ENV CGO_ENABLED=1 GOOS=linux GOARCH=amd64
 RUN go build -o main cmd/api/main.go
 
+FROM alpine:3.20.1 AS prod
+
+# Install necessary runtime libraries for CGO
+RUN apk add --no-cache libc6-compat
 FROM alpine:3.20.1 AS prod
 WORKDIR /app
 COPY --from=build /app/main /app/main
