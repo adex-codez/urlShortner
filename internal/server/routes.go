@@ -1,14 +1,19 @@
 package server
 
 import (
-	"encoding/json"
+	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
+	"os"
 	"regexp"
+	"strings"
 	"time"
 
-	"github.com/jmoiron/sqlx"
+	"urlShortner/cmd/web"
+	"urlShortner/internal/database"
+
+	"github.com/a-h/templ"
 )
 
 func (s *Server) RegisterRoutes() http.Handler {
@@ -16,8 +21,11 @@ func (s *Server) RegisterRoutes() http.Handler {
 
 	// Register routes
 	mux.HandleFunc("/shorten-url", s.GenerateShortUrlHandler)
+	mux.HandleFunc("/", s.CatchAllHandler)
 
-	mux.HandleFunc("/health", s.healthHandler)
+	fileServer := http.FileServer(http.FS(web.Files))
+	mux.Handle("/assets/", fileServer)
+	mux.Handle("/index", templ.Handler(web.UrlShortnerForm()))
 
 	// Wrap the mux with CORS middleware
 	return s.corsMiddleware(mux)
@@ -54,49 +62,53 @@ func randomString(length int) string {
 }
 
 func (s *Server) GenerateShortUrlHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 
-	type Url struct {
-		Url string `json:"url"`
-	}
-
-	var url Url
-
-	err := json.NewDecoder(r.Body).Decode(&url)
-
+	err := r.ParseForm()
 	if err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
-		return
+		http.Error(w, "Invalid Form data", http.StatusBadRequest)
 	}
+
+	url := r.FormValue("url")
 
 	urlRegex := `https?://(?:www\.)?[a-zA-Z0-9-]+(\.[a-zA-Z]{2,})+(:[0-9]{1,5})?(/[^\s]*)?`
 	re := regexp.MustCompile(urlRegex)
-	isMatch := re.MatchString(url.Url)
+	isMatch := re.MatchString(url)
 
 	if !isMatch {
 		http.Error(w, "Invalid Url", http.StatusBadRequest)
 		return
 	}
 
-	uniquecode := randomString(4)
+	unique_code := randomString(4)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 
-	insertUrl = `insert into url (long_url, unique_code) values (?, ?)`
+	res, err := s.db.Exec("insert into url (long_url, unique_code) values (?, ?)", url, unique_code)
+	_ = res
+	if err != nil {
+		http.Error(w, "Unable to add to database", http.StatusInternalServerError)
+		log.Printf(err.Error())
+	}
 
+	component := web.ShowUrl(fmt.Sprint(os.Getenv("URL"), unique_code))
+	err = component.Render(r.Context(), w)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	}
 }
 
-func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
-	resp, err := json.Marshal(s.db.Health())
-	if err != nil {
-		http.Error(w, "Failed to marshal health check response", http.StatusInternalServerError)
+func (s *Server) CatchAllHandler(w http.ResponseWriter, r *http.Request) {
+	unique_code := strings.TrimPrefix(r.URL.Path, "/")
+	if unique_code == "" || strings.Contains(unique_code, "/") {
+		http.Error(w, "Invalid unique_code", http.StatusBadRequest)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	if _, err := w.Write(resp); err != nil {
-		log.Printf("Failed to write response: %v", err)
+
+	var url database.Url
+	err := s.db.Get(&url, "Select long_url, unique_code from url WHERE unique_code=$1", unique_code)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error fetching url: %s", err), http.StatusInternalServerError)
 	}
+
+	http.Redirect(w, r, url.LongUrl, http.StatusPermanentRedirect)
 }
