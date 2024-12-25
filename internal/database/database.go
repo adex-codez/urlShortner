@@ -4,13 +4,13 @@ import (
 	"log"
 	"os"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/joho/godotenv/autoload"
-	_ "github.com/mattn/go-sqlite3"
 )
 
 var (
-	dburl      = os.Getenv("BLUEPRINT_DB_URL")
+	dburl      = os.Getenv("DATABASE_URL")
 	dbInstance *sqlx.DB
 )
 
@@ -20,7 +20,7 @@ func New() *sqlx.DB {
 		return dbInstance
 	}
 
-	db, err := sqlx.Connect("sqlite3", dburl)
+	db, err := sqlx.Connect("pgx", dburl)
 	if err != nil {
 		// This will not be a connection error, but a DSN parse error or
 		// another initialization error.
