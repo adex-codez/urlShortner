@@ -105,7 +105,7 @@ func (s *Server) CatchAllHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var url database.Url
-	err := s.db.Get(&url, "Select long_url, unique_code from url WHERE unique_code=$1", unique_code)
+	err := s.db.QueryRowx("Select long_url, unique_code from url WHERE unique_code=?", unique_code).StructScan(&url)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error fetching url: %s", err), http.StatusInternalServerError)
 	}
